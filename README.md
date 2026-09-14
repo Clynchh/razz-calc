@@ -9,5 +9,3 @@ Enter the six upcards in seat order (the bring-in is always rightmost), pick you
 - Opponents' call and raise rates on 3rd street are fixed estimates per upcard, not solved — treat results as a strong guide, not a perfect-play solver.
 
 The page runs entirely in your browser; the first load downloads about 26 MB of precomputed tables.
-
-[![Support me on Ko-fi](https://storage.ko-fi.com/cdn/kofi6.png?v=6)](https://ko-fi.com/D7A024GUDE)
