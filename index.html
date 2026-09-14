@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Razz 3rd Street — Opening Threshold</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="./styles.css" />
+    <style>
+      .seats { display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; align-items: flex-end; }
+      .seat { border: 1px solid var(--line); background: var(--surface);
+              border-radius: 4px; padding: 6px 8px; min-width: 78px; }
+      .seat.hero { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+      .seat.bi { border-style: dashed; }
+      .seat .who { font-size: 11px; color: var(--muted); margin-bottom: 4px; white-space: nowrap; }
+      .seat .who b { color: var(--accent); }
+      .seat select { width: 100%; background: var(--canvas); color: var(--ink);
+                     border: 1px solid var(--line); border-radius: 3px; font: inherit; padding: 2px; }
+      .seat button { width: 100%; margin-top: 4px; font: inherit; font-size: 11px;
+                     background: transparent; color: var(--muted);
+                     border: 1px solid var(--line); border-radius: 3px; cursor: pointer; }
+      .seat.hero button { color: var(--accent); border-color: var(--accent); }
+      .seat button:disabled { opacity: .35; cursor: not-allowed; }
+      .big { font-size: 20px; font-weight: 600; }
+      /* distribution modal */
+      .modal { position: fixed; inset: 0; background: rgba(0,0,0,.7);
+               display: grid; place-items: center; z-index: 20; }
+      .modal-box { background: var(--surface); border: 1px solid var(--line);
+                   border-radius: 6px; padding: 18px; width: min(900px, 92vw); }
+      .modal-box h2 { margin: 0 0 4px; font-size: var(--fs-heading); }
+      .modal-box .sub { color: var(--muted); margin-bottom: 12px; }
+      .cmp-row { display: flex; gap: 4px; flex-wrap: wrap; }
+      .cmp-btn { width: 30px; height: 28px; font: inherit; font-weight: 600;
+                 background: var(--canvas); color: var(--muted);
+                 border: 1px solid var(--line); border-radius: 3px; cursor: pointer; }
+      .cmp-btn:disabled { cursor: default; }
+      #dist-tip { z-index: 30; }
+      /* support button: pinned bottom-right, under the modal and tooltips */
+      .kofi { position: fixed; right: 16px; bottom: 16px; z-index: 15; line-height: 0; }
+      .modal-close { float: right; background: transparent; color: var(--muted);
+                     border: 1px solid var(--line); border-radius: 3px;
+                     font: inherit; cursor: pointer; padding: 2px 8px; }
+    </style>
+  </head>
+  <body>
+    <div id="loading" class="loading">
+      <div class="loading-box">
+        <div id="loading-label" class="loading-label">Loading</div>
+        <div class="bar"><div id="bar-fill" class="bar-fill"></div></div>
+        <div id="loading-pct" class="loading-pct">0%</div>
+        <div id="loading-error" class="loading-error" hidden></div>
+      </div>
+    </div>
+
+    <main id="app" class="app" hidden>
+      <section class="left">
+        <div id="seats" class="seats"></div>
+        <div id="matrix-wrap" class="matrix-wrap">
+          <div id="matrix" class="matrix" role="grid" aria-label="opening decision by downcards"></div>
+        </div>
+        <div class="legend">
+          <div id="legend-bar" class="legend-bar"></div>
+          <div class="legend-scale">
+            <span id="legend-left"></span><span id="legend-right"></span>
+          </div>
+        </div>
+      </section>
+
+      <aside class="rail">
+        <div class="rail-block">
+          <div class="rail-heading">Required equity</div>
+          <div id="req" class="big"></div>
+          <div id="reqsub" class="rail-sub"></div>
+          <div id="opens" class="rail-sub"></div>
+        </div>
+
+        <div class="rail-block">
+          <div class="rail-heading">Why</div>
+          <div id="why" class="rail-note"></div>
+        </div>
+
+        <div class="rail-block">
+          <div class="rail-heading">View</div>
+          <label class="radio"><input type="radio" name="view" value="absolute" checked /> Absolute</label>
+          <label class="radio"><input type="radio" name="view" value="change" /> Change vs avg</label>
+          <div class="rail-note">
+            Change compares each hand's percentile on this board against its
+            percentile in the upcard-blind average, so it isolates reordering.
+            Clamped at ±8 points.
+          </div>
+        </div>
+
+        <div class="rail-block">
+          <div class="rail-heading">Colour scale</div>
+          <label class="radio"><input type="radio" name="colorby" value="equity" checked /> Equity (linear)</label>
+          <label class="radio"><input type="radio" name="colorby" value="percentile" /> Percentile (rank)</label>
+        </div>
+
+        <div class="rail-block">
+          <div class="rail-heading">Cell value</div>
+          <label class="radio"><input type="radio" name="cellval" value="equity" checked /> Equity %</label>
+          <label class="radio"><input type="radio" name="cellval" value="percentile" /> Percentile</label>
+          <label class="radio"><input type="radio" name="cellval" value="rank" /> Rank</label>
+          <label class="radio"><input type="radio" name="cellval" value="ev" /> EV vs fold (c)</label>
+        </div>
+
+        <div class="rail-block">
+          <div class="rail-heading">Percentile band</div>
+          <div id="p-label" class="rail-sub">top 0% – 100%</div>
+          <div class="dual" id="pdual">
+            <div class="dual-track"></div><div class="dual-fill" id="p-fill"></div>
+            <input type="range" id="pmin" min="0" max="100" step="1" value="0" aria-label="band start percentile" />
+            <input type="range" id="pmax" min="0" max="100" step="1" value="100" aria-label="band end percentile" />
+          </div>
+          <div id="p-count" class="rail-sub"></div>
+        </div>
+
+        <div class="rail-block">
+          <div class="rail-heading">Equity band</div>
+          <div id="e-label" class="rail-sub">0% – 100% equity</div>
+          <div class="dual" id="edual">
+            <div class="dual-track"></div><div class="dual-fill" id="e-fill"></div>
+            <input type="range" id="emin" min="0" max="100" step="1" value="0" aria-label="band lower equity" />
+            <input type="range" id="emax" min="0" max="100" step="1" value="100" aria-label="band upper equity" />
+          </div>
+          <div id="e-count" class="rail-sub"></div>
+          <div class="rail-note">Both bands compose with the open/fold call — a cell must satisfy all of them.</div>
+        </div>
+
+        <div class="rail-block">
+          <div class="rail-heading">Scale range</div>
+          <label class="radio"><input type="checkbox" id="fit" checked /> Fit colour to this board</label>
+          <div class="rail-note">
+            Off, the ramp is anchored to 100% so boards stay comparable. On, it
+            stretches to this board's strongest hand.
+          </div>
+        </div>
+
+        <div class="rail-block">
+          <div class="rail-heading">Bring-in extra defence</div>
+          <div id="bi-label" class="rail-sub">+45 points</div>
+          <input type="range" id="biextra" min="0" max="80" step="5" value="45" style="width:100%" />
+          <div class="rail-note">The bring-in has 45c in already, so it defends far wider than its card suggests.</div>
+        </div>
+
+        <div class="rail-block">
+          <div class="rail-heading">Strongest 10</div>
+          <div id="top-list" class="top-list"></div>
+          <button id="dist-btn" class="btn" type="button">Distribution…</button>
+        </div>
+
+        <div class="rail-block">
+          <div class="rail-heading">Continue rates used</div>
+          <div id="rates" class="rail-note"></div>
+        </div>
+
+        <div class="rail-block">
+          <div class="rail-heading">Reading this</div>
+          <div class="rail-note">
+            Green cells clear the bar and are opens; dim ones fold. Equity is
+            measured against whoever actually calls, weighted across the seats
+            behind you — not against a random hand.
+          </div>
+          <div id="basis" class="rail-note"></div>
+        </div>
+
+        <div id="meta" class="rail-meta"></div>
+      </aside>
+    </main>
+
+    <div id="dist" class="modal" hidden>
+      <div class="modal-box">
+        <button id="dist-close" class="modal-close" type="button">close</button>
+        <h2>Range distribution</h2>
+        <div id="dist-sub" class="sub"></div>
+        <div id="dist-chart"></div>
+        <div class="rail-sub" style="margin:10px 0 4px">Y axis</div>
+        <div id="dist-axis" class="cmp-row"></div>
+        <div class="rail-sub" style="margin:10px 0 4px">Compare other upcards</div>
+        <div id="dist-cmp" class="cmp-row"></div>
+        <div id="dist-note" class="rail-note"></div>
+      </div>
+    </div>
+
+    <a class="kofi" href="https://ko-fi.com/D7A024GUDE" target="_blank" rel="noopener"><img height="36" style="border:0px;height:36px;" src="https://storage.ko-fi.com/cdn/kofi6.png?v=6" border="0" alt="Buy Me a Coffee at ko-fi.com" /></a>
+
+    <div id="dist-tip" class="tooltip" hidden></div>
+    <div id="tooltip" class="tooltip" hidden></div>
+    <script type="module" src="./js/open-app.js"></script>
+  </body>
+</html>

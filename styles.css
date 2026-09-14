@@ -1,0 +1,431 @@
+:root {
+  --canvas: #1b1f1d;
+  --surface: #242a27;
+  --line: #333b37;
+  --ink: #e8e6e0;
+  --muted: #8c9490;
+  --accent: #4a9db5;
+
+  --cell: 52px;
+  --fs-body: 13px;
+  --fs-heading: 15px;
+  --fs-cell-label: 12px;
+  --fs-cell-value: 11px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* `hidden` must win over the display rules below */
+[hidden] {
+  display: none !important;
+}
+
+html,
+body {
+  margin: 0;
+  background: var(--canvas);
+  color: var(--ink);
+  font-family: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-size: var(--fs-body);
+  font-variant-numeric: tabular-nums;
+  -webkit-font-feature-settings: "tnum";
+  font-feature-settings: "tnum";
+}
+
+/* ---- loading ------------------------------------------------------- */
+.loading {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: var(--canvas);
+  z-index: 10;
+}
+.loading-box {
+  width: 320px;
+}
+.loading-label {
+  font-size: var(--fs-heading);
+  font-weight: 600;
+  margin-bottom: 10px;
+}
+.bar {
+  height: 4px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.bar-fill {
+  height: 100%;
+  width: 0;
+  background: var(--accent);
+}
+.loading-pct {
+  margin-top: 8px;
+  color: var(--muted);
+}
+.loading-error {
+  margin-top: 14px;
+  color: var(--ink);
+  line-height: 1.5;
+}
+
+/* ---- layout ------------------------------------------------------- */
+.app {
+  display: grid;
+  /* the matrix is a fixed 13x13 square, so let the left column size to it and
+     give every remaining pixel to the controls rather than to dead space */
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 24px;
+  padding: 20px 24px;
+  align-items: start;
+}
+@media (max-width: 1100px) {
+  .app {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.left {
+  min-width: 0;
+}
+
+/* ---- hero upcard selector -------------------------------------- */
+.upcard-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.hero-upcards {
+  display: flex;
+  gap: 4px;
+}
+.hero-upcards button {
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink);
+  font: 600 var(--fs-cell-label) / 1 "IBM Plex Sans", sans-serif;
+  font-variant-numeric: tabular-nums;
+  border-radius: 3px;
+  cursor: pointer;
+}
+.hero-upcards button[aria-pressed="true"] {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+  color: var(--accent);
+}
+.hero-upcards button:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+/* ---- matrix ----------------------------------------------------- */
+.matrix-wrap {
+  position: relative;
+  width: fit-content;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  padding: 8px;
+  overflow-x: auto;
+}
+.matrix {
+  display: grid;
+  grid-template-columns: repeat(13, var(--cell));
+  grid-auto-rows: var(--cell);
+  gap: 2px;
+  width: max-content;
+}
+.cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  border: 0;
+  padding: 0;
+  font-family: inherit;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+  background: var(--surface);
+  cursor: default;
+  outline: none;
+  transition: background-color 150ms ease;
+}
+.cell .lbl {
+  font-size: var(--fs-cell-label);
+  font-weight: 600;
+}
+.cell .val {
+  font-size: var(--fs-cell-value);
+  font-weight: 400;
+}
+/* opens under one calling assumption but not the other — undecided, and shown
+   as such rather than rounded to a clean yes or no */
+/* outside the selected percentile band — recede without vanishing */
+.cell.outside {
+  opacity: 0.16;
+}
+/* no combos left for this hand on the current board — outlined and marked n/a
+   rather than blanked, so an impossible cell is distinguishable from an empty
+   one below the diagonal */
+.cell.infeasible {
+  background: transparent;
+  color: var(--muted);
+  box-shadow: inset 0 0 0 1px var(--line);
+  opacity: 0.75;
+}
+.cell:focus-visible,
+.cell.kbd-focus {
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+.matrix.dim {
+  opacity: 0.25;
+  pointer-events: none;
+}
+.matrix-overlay {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-size: var(--fs-heading);
+  font-weight: 600;
+  color: var(--muted);
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cell {
+    transition: none;
+  }
+}
+
+/* ---- legend --------------------------------------------------- */
+.legend {
+  margin-top: 16px;
+}
+.legend-bar {
+  height: 10px;
+  border: 1px solid var(--line);
+}
+.legend-scale {
+  display: flex;
+  justify-content: space-between;
+  color: var(--muted);
+  margin-top: 4px;
+}
+
+/* ---- right rail --------------------------------------------- */
+.rail {
+  /* The rail gets 475px beside the 718px matrix at a 1280px viewport, so the
+     column width has to leave room for two of them plus the gap. max-width caps
+     it at three columns on a wide screen rather than fanning out into six. */
+  columns: 210px;
+  column-gap: 24px;
+  max-width: 720px;
+}
+.rail-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  break-inside: avoid; /* never split a control group across columns */
+  margin-bottom: 22px;
+}
+.rail-heading {
+  font-size: var(--fs-heading);
+  font-weight: 600;
+}
+.rail-sub {
+  color: var(--muted);
+}
+.rail-note,
+.rail-meta {
+  color: var(--muted);
+  line-height: 1.5;
+}
+.rail-meta {
+  font-size: 12px;
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+
+.opp-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.opp-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.opp-row .rk {
+  width: 16px;
+  font-weight: 600;
+  color: var(--muted);
+}
+.opp-row .slot {
+  width: 18px;
+  height: 18px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  border-radius: 2px;
+  cursor: pointer;
+  padding: 0;
+}
+.opp-row .slot[aria-pressed="true"] {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.btn-row {
+  display: flex;
+  gap: 8px;
+}
+.btn-row .btn {
+  flex: 1;
+}
+.btn {
+  align-self: flex-start;
+  margin-top: 4px;
+  padding: 5px 12px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink);
+  font: 400 var(--fs-body) / 1 inherit;
+  border-radius: 3px;
+  cursor: pointer;
+}
+.btn:hover {
+  border-color: var(--muted);
+}
+
+.radio {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+/* both pages disable a control when the active view makes it meaningless
+   (expand vs the change / equity scales) — dim the label so that reads */
+.radio:has(input:disabled) {
+  opacity: 0.45;
+}
+.radio input {
+  accent-color: var(--accent);
+}
+
+/* ---- tooltip ------------------------------------------------- */
+.tooltip {
+  position: fixed;
+  z-index: 20;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  padding: 8px 10px;
+  pointer-events: none;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre;
+  color: var(--ink);
+}
+.tooltip .t-hand {
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+
+/* ---- shared by average.html and complex.html ---------------------- */
+/* page-specific: the rail is lighter here, and gains a ranked list */
+.top-list {
+  display: grid;
+  grid-template-columns: auto auto 1fr auto;
+  gap: 2px 10px;
+  margin-top: 8px;
+}
+.top-list span {
+  white-space: nowrap;
+}
+.top-list .n {
+  color: var(--muted);
+}
+.top-list .e {
+  text-align: right;
+}
+.top-list .v {
+  text-align: right;
+  color: var(--muted);
+}
+.top-list .row-hi.v {
+  color: var(--accent);
+}
+.top-list .row-hi {
+  color: var(--accent);
+  font-weight: 600;
+}
+.xref {
+  color: var(--accent);
+}
+/* dual-handle range: two overlaid inputs, thumbs clickable, tracks not */
+.dual {
+  position: relative;
+  height: 26px;
+  margin: 10px 0 4px;
+}
+.dual-track,
+.dual-fill {
+  position: absolute;
+  top: 11px;
+  height: 4px;
+  border-radius: 2px;
+  pointer-events: none;
+}
+.dual-track {
+  left: 0;
+  right: 0;
+  background: var(--line);
+}
+.dual-fill {
+  background: var(--accent);
+}
+.dual input[type="range"] {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 26px;
+  margin: 0;
+  background: transparent;
+  pointer-events: none;
+  -webkit-appearance: none;
+  appearance: none;
+}
+.dual input[type="range"]:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 2px;
+}
+.dual input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  pointer-events: auto;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: var(--ink);
+  border: 2px solid var(--accent);
+  cursor: pointer;
+}
+.dual input[type="range"]::-moz-range-thumb {
+  pointer-events: auto;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: var(--ink);
+  border: 2px solid var(--accent);
+  cursor: pointer;
+}
+.band-eq {
+  color: var(--muted);
+  margin-top: 2px;
+}
