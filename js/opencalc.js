@@ -3,13 +3,14 @@
 // Lives apart from the page so the page and tools/export-opens.mjs run the very
 // same arithmetic — a spreadsheet built from a copy of this code would drift.
 //
-// ctx = { hu, avg, reals, ups, hero }: the loaded tables, the six upcards in
-// seat order (rightmost is the bring-in) and hero's seat index.
+// ctx = { hu, avg, reals, rates, ups, hero }: the loaded tables, the continue
+// and raise rates for this table size (razz's solved ones six-handed), the
+// upcards in seat order (rightmost is the bring-in) and hero's seat index.
 
 import { handId } from "./hands.js";
 import { multisetRank } from "./combinadics.js";
 import { BRANCH_CALL, BRANCH_RAISE } from "./real.js";
-import { CONTINUE, RAISE, evComplete, ANTE } from "./openrule.js";
+import { RAZZ_RATES, evComplete, ANTE } from "./openrule.js";
 
 export const DOWN = [];
 for (let a = 0; a < 13; a++) for (let b = a; b < 13; b++) DOWN.push([a, b]);
@@ -17,6 +18,12 @@ export const idxOf = (d) => d[0] * 13 - (d[0] * (d[0] - 1)) / 2 + (d[1] - d[0]);
 
 export const combos = (d, av) =>
   d[0] === d[1] ? (av[d[0]] * (av[d[0]] - 1)) / 2 : av[d[0]] * av[d[1]];
+
+// A seat that "never" continues still has a range once it does call — and a
+// zero rate would leave it empty, with nothing to measure equity against. The
+// engine floors its priors the same way; razz's smallest solved rate is 2%, so
+// six-handed razz is unchanged.
+const MIN_RANGE = 0.02;
 
 export function continuing(avg, up, avail, frac) {
   const cand = [];
@@ -30,7 +37,7 @@ export function continuing(avg, up, avail, frac) {
   const keep = [];
   let acc = 0;
   for (const c of cand) {
-    if (acc >= frac * total) break;
+    if (acc >= Math.max(MIN_RANGE, frac) * total) break;
     keep.push(c);
     acc += c.w;
   }
@@ -46,6 +53,7 @@ export function continuing(avg, up, avail, frac) {
  * with hero's seat swapped.
  */
 export function handEquities(ctx, heroUp, req) {
+  const { CONTINUE, RAISE } = ctx.rates ?? RAZZ_RATES;
   const avail = new Array(13).fill(4);
   ctx.ups.forEach((u, k) => avail[k === ctx.hero ? heroUp : u]--);
 

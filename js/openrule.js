@@ -34,14 +34,18 @@ export const CONTINUE = [0.92, 0.80, 0.66, 0.52, 0.40, 0.36, 0.32, 0.27, 0.23,
 export const RAISE = [0.91, 0.70, 0.50, 0.35, 0.26, 0.19, 0.13, 0.09, 0.05,
                       0.03, 0.01, 0.01, 0.02];
 
+/** Razz's rates; the stud pages pass their own, derived in engine/stud/fit.mjs. */
+export const RAZZ_RATES = { CONTINUE, RAISE };
+
 /** The bring-in already has ante+bring-in in, so it defends far wider. */
-export const bringInDefence = (rank, extra = 0.45) =>
-  Math.min(0.95, CONTINUE[rank] + extra);
+export const bringInDefence = (rank, extra = 0.45, cont = CONTINUE) =>
+  Math.min(0.95, cont[rank] + extra);
 
 /**
- * Who acts when. Razz brings in on the highest upcard; ties go to the earliest
- * seat, which is a real simplification — at the table it is decided by suit, and
- * on a board with two kings that shifts the whole order.
+ * Who acts when. The bring-in is the highest rank *index* — the highest card in
+ * razz, the lowest in stud, whose pages number ranks strongest first; ties go to
+ * the earliest seat, which is a real simplification — at the table it is
+ * decided by suit, and on a board with two kings that shifts the whole order.
  */
 export function seating(ups) {
   // The bring-in is the rightmost seat by construction, not by detection. The
@@ -74,14 +78,15 @@ export function evComplete(ctx, eqVsCall, eqVsRaise) {
   return ctx.pAllFold * ctx.winFold + ctx.pCallOnly * call + ctx.pRaised * raise;
 }
 
-export function requirement(ups, hero, biExtra = 0.45) {
+export function requirement(ups, hero, biExtra = 0.45, rates = RAZZ_RATES) {
+  const { CONTINUE, RAISE } = rates;
   const n = ups.length;
   const { bringIn, order } = seating(ups);
   const pos = order.indexOf(hero) + 1;              // hero acts at BI+pos
   if (hero === bringIn) return null;                // the bring-in has its own spot
 
   const behind = order.slice(pos);                  // seats yet to act
-  const biCont = bringInDefence(ups[bringIn], biExtra);
+  const biCont = bringInDefence(ups[bringIn], biExtra, CONTINUE);
 
   let pAllFold = 1 - biCont;
   for (const s of behind) pAllFold *= 1 - CONTINUE[ups[s]];
@@ -110,8 +115,8 @@ export function requirement(ups, hero, biExtra = 0.45) {
 
   // who is doing the raising, for the equity lookup
   const raisers = [];
-  for (const s of behind) if (RAISE[ups[s]] > 0.005) raisers.push({ up: ups[s], p: RAISE[ups[s]] });
-  if (RAISE[ups[bringIn]] > 0.005) raisers.push({ up: ups[bringIn], p: RAISE[ups[bringIn]] });
+  for (const s of behind) if (RAISE[ups[s]] > 0.005) raisers.push({ seat: s, up: ups[s], p: RAISE[ups[s]] });
+  if (RAISE[ups[bringIn]] > 0.005) raisers.push({ seat: bringIn, up: ups[bringIn], p: RAISE[ups[bringIn]] });
   const rSum = raisers.reduce((a, b) => a + b.p, 0) || 1;
   for (const r of raisers) r.p /= rSum;
 

@@ -49,6 +49,12 @@
     </style>
   </head>
   <body>
+    <nav class="game-nav" aria-label="Game">
+      <a href="./" aria-current="page">Razz</a>
+      <a href="./stud.html">Stud</a>
+      <a href="./stud8.html">Stud Hi-Lo 8</a>
+    </nav>
+
     <div id="loading" class="loading">
       <div class="loading-box">
         <div id="loading-label" class="loading-label">Loading</div>
@@ -60,7 +66,20 @@
 
     <main id="app" class="app" hidden>
       <section class="left">
+        <div class="mode-row" role="group" aria-label="Mode">
+          <button type="button" class="mode-btn" data-mode="board" aria-pressed="true">Board</button>
+          <button type="button" class="mode-btn" data-mode="raw" aria-pressed="false">Raw averages</button>
+          <span class="mode-sep" aria-hidden="true"></span>
+          <span class="mode-label">Players</span>
+          <button type="button" class="mode-btn size-btn" data-seats="6" aria-pressed="true">6</button>
+          <button type="button" class="mode-btn size-btn" data-seats="3" aria-pressed="false">3</button>
+          <button type="button" class="mode-btn size-btn" data-seats="2" aria-pressed="false">2</button>
+        </div>
         <div id="seats" class="seats"></div>
+        <div id="raw-picker" class="upcard-row" hidden>
+          <span class="rail-sub">Your upcard</span>
+          <div id="raw-ups" class="hero-upcards" role="group" aria-label="your upcard"></div>
+        </div>
         <div id="matrix-wrap" class="matrix-wrap">
           <div id="matrix" class="matrix" role="grid" aria-label="opening decision by downcards"></div>
         </div>
@@ -69,23 +88,32 @@
           <div class="legend-scale">
             <span id="legend-left"></span><span id="legend-right"></span>
           </div>
+          <div id="legend-fold" class="legend-fold"><span class="swatch"></span>fold: below the bar</div>
         </div>
       </section>
 
       <aside class="rail">
-        <div class="rail-block">
+        <div class="rail-block raw-only" hidden>
+          <div class="rail-heading">Raw averages</div>
+          <div class="rail-note">
+            No board: each hand's all-in equity <span class="n-seats">six</span>-handed, against <span class="n-opp">five random hands</span>. This is the strength order every board starts from.
+            Razz's average ignores which card is face up, so A-2/3 and 2-3/A read the same; the upcard you pick only takes one of its rank out of the deck.
+          </div>
+        </div>
+
+        <div class="rail-block board-only">
           <div class="rail-heading">Required equity</div>
           <div id="req" class="big"></div>
           <div id="reqsub" class="rail-sub"></div>
           <div id="opens" class="rail-sub"></div>
         </div>
 
-        <div class="rail-block">
+        <div class="rail-block board-only">
           <div class="rail-heading">Why</div>
           <div id="why" class="rail-note"></div>
         </div>
 
-        <div class="rail-block">
+        <div class="rail-block board-only">
           <div class="rail-heading">View</div>
           <label class="radio"><input type="radio" name="view" value="absolute" checked /> Absolute</label>
           <label class="radio"><input type="radio" name="view" value="change" /> Change vs avg</label>
@@ -107,7 +135,7 @@
           <label class="radio"><input type="radio" name="cellval" value="equity" checked /> Equity %</label>
           <label class="radio"><input type="radio" name="cellval" value="percentile" /> Percentile</label>
           <label class="radio"><input type="radio" name="cellval" value="rank" /> Rank</label>
-          <label class="radio"><input type="radio" name="cellval" value="ev" /> EV vs fold (c)</label>
+          <label class="radio board-only"><input type="radio" name="cellval" value="ev" /> EV vs fold (c)</label>
         </div>
 
         <div class="rail-block">
@@ -142,7 +170,7 @@
           </div>
         </div>
 
-        <div class="rail-block">
+        <div class="rail-block board-only">
           <div class="rail-heading">Bring-in extra defence</div>
           <div id="bi-label" class="rail-sub">+45 points</div>
           <input type="range" id="biextra" min="0" max="80" step="5" value="45" style="width:100%" />
@@ -152,18 +180,19 @@
         <div class="rail-block">
           <div class="rail-heading">Strongest 10</div>
           <div id="top-list" class="top-list"></div>
-          <button id="dist-btn" class="btn" type="button">Distribution…</button>
+          <button id="dist-btn" class="btn board-only" type="button">Distribution…</button>
         </div>
 
-        <div class="rail-block">
+        <div class="rail-block board-only">
           <div class="rail-heading">Continue rates used</div>
           <div id="rates" class="rail-note"></div>
+          <div id="rates-basis" class="rail-note"></div>
         </div>
 
-        <div class="rail-block">
+        <div class="rail-block board-only">
           <div class="rail-heading">Reading this</div>
           <div class="rail-note">
-            Green cells clear the bar and are opens; dim ones fold. Equity is
+            Green cells clear the bar and are opens; blue ones fold. Equity is
             measured against whoever actually calls, weighted across the seats
             behind you — not against a random hand.
           </div>

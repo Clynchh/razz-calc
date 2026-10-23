@@ -8,15 +8,25 @@ import { rankChar } from "./hands.js";
 import { loadHu } from "./hu.js";
 import { loadReal } from "./real.js";
 import { heatColor, changeColor, rgbCss, textOn } from "./color.js";
-import { DOWN, idxOf, handEquities as calcHandEquities } from "./opencalc.js";
-import { CONTINUE, seating, requirement } from "./openrule.js";
+import { DOWN, idxOf, combos, handEquities as calcHandEquities } from "./opencalc.js";
+import { multisetRank } from "./combinadics.js";
+import { RAZZ_RATES, seating, requirement } from "./openrule.js";
 
 const $ = (id) => document.getElementById(id);
+
+// Six-handed is the original razz solver's tables in data/, with its solved
+// continue and raise rates. Three-handed and heads-up come from engine/stud
+// (data/razz/n3, n2), with rates derived the same way as the stud games'.
+const dirFor = (n) => (n === 6 ? "./data" : `./data/razz/n${n}`);
+const DEFAULT_UPS = { 6: [0, 2, 4, 6, 8, 12], 3: [0, 4, 12], 2: [0, 12] };   // rightmost brings in
+const SEAT_WORDS = { 6: ["six", "five random hands"], 3: ["three", "two random hands"], 2: ["two", "one random hand"] };
 
 const state = {
   hu: null, avg: null,
   reals: [],                  // one realised table per lookahead setting
-  ups: [0, 2, 4, 6, 8, 12],   // A 3 5 7 9 K — rightmost is always the bring-in
+  rates: RAZZ_RATES,          // { CONTINUE, RAISE } for this table size
+  n: 6,                       // players at the table
+  ups: DEFAULT_UPS[6].slice(), // A 3 5 7 9 K — rightmost is always the bring-in
   hero: 0,
   biExtra: 0.45,
   view: "absolute",
@@ -29,38 +39,21 @@ const state = {
   cmpUps: new Set(),          // upcards overlaid on the distribution chart
   distY: "ev",                // distribution y-axis: "ev" or "equity"
   req: null,
+  mode: "board",              // "board", or "raw": no board, N-handed averages
+  rawUp: 0,                   // hero's upcard in raw mode
 };
 
 const cellEl = Array.from({ length: 13 }, () => new Array(13).fill(null));
+const FOLD_RGB = [46, 94, 140];   // --fold in styles.css
+const heroUpcard = () => (state.mode === "raw" ? state.rawUp : state.ups[state.hero]);
 
 boot();
 
 async function boot() {
   try {
     $("loading-label").textContent = "Loading equity matrix";
-    const [hu, avg] = await Promise.all([
-      loadHu("./data/hu.bin", (f) => setBar(f)),
-      fetch("./data/average.json").then((r) => (r.ok ? r.json() : null)),
-    ]);
-    state.hu = hu;
-    state.avg = avg?.meanEquity;
-    if (!state.avg) throw new Error("average.json is needed to order calling ranges");
-    // Later-street play has a free parameter — how many bets a caller prices
-    // into its decision. Lookahead 2 is closer to right on 4th (a caller can
-    // still fold on 5th); lookahead 4 is closer on 5th (callers there mostly go
-    // to the river); they agree on 6th and 7th. Each is right on one street and
-    // wrong on the other, so they are weighted equally. The visible-board table
-    // prices calls off the wrong information and is only a fallback.
-    const load = async (file, label) => {
-      try {
-        $("loading-label").textContent = `Loading ${label}`;
-        const t = await loadReal(file, (f) => f != null && setBar(f));
-        state.reals.push({ table: t, label, file });
-      } catch { /* optional */ }
-    };
-    await load("./data/real-la2.bin", "2-street");
-    await load("./data/real-la4.bin", "4-street");
-    if (!state.reals.length) await load("./data/real.bin", "visible-board");
+    state.hu = await loadHu("./data/hu.bin", (f) => setBar(f));
+    await loadSize(6);
   } catch (err) {
     const box = $("loading-error");
     box.hidden = false;
@@ -69,12 +62,70 @@ async function boot() {
     return;
   }
   buildSeats();
+  buildRawPicker();
   buildGrid();
   wire();
   recompute();
   $("loading").hidden = true;
   $("app").hidden = false;
 }
+/** One table size's averages, rates and realised tables, fetched once. */
+const sizeCache = new Map();
+async function loadSize(n) {
+  if (!sizeCache.has(n)) {
+    const dir = dirFor(n);
+    $("loading-label").textContent = `Loading ${n}-handed tables`;
+    const json = (f) => fetch(`${dir}/${f}`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+    const [avg, rates] = await Promise.all([json("average.json"), n === 6 ? null : json("rates.json")]);
+    if (!avg?.meanEquity) throw new Error("average.json is needed to order calling ranges");
+    if (n !== 6 && !rates) throw new Error("rates.json is needed for the continue and raise rates");
+    // Later-street play has a free parameter — how many bets a caller prices
+    // into its decision. Lookahead 2 is closer to right on 4th (a caller can
+    // still fold on 5th); lookahead 4 is closer on 5th (callers there mostly go
+    // to the river); they agree on 6th and 7th. Each is right on one street and
+    // wrong on the other, so they are weighted equally. The visible-board table
+    // prices calls off the wrong information and is only a fallback.
+    const reals = [];
+    const load = async (file, label) => {
+      try {
+        $("loading-label").textContent = `Loading ${n}-handed ${label}`;
+        reals.push({ table: await loadReal(`${dir}/${file}`, (f) => f != null && setBar(f)), label, file });
+      } catch { /* optional */ }
+    };
+    await load("real-la2.bin", "2-street");
+    await load("real-la4.bin", "4-street");
+    if (!reals.length && n === 6) await load("real.bin", "visible-board");
+    sizeCache.set(n, {
+      avg: avg.meanEquity, reals,
+      rates: rates ? { CONTINUE: rates.continue, RAISE: rates.raise } : RAZZ_RATES,
+    });
+  }
+  Object.assign(state, sizeCache.get(n), { n });
+}
+
+/** Switch table size: tables load on first use, and the board resets to fit. */
+async function setSize(n) {
+  if (n === state.n) return;
+  if (!sizeCache.has(n)) {
+    setBar(0);
+    $("loading").hidden = false;
+  }
+  try {
+    await loadSize(n);
+  } catch (err) {
+    alert(`Could not load the ${n}-handed tables from ${dirFor(n)}/.\n` +
+      `Run  node engine/stud/build.mjs razz all --seats ${n}\n\n(${err.message})`);
+    return;
+  } finally {
+    $("loading").hidden = true;
+  }
+  state.ups = DEFAULT_UPS[n].slice();
+  state.hero = 0;
+  state.cmpUps.clear();
+  buildSeats();
+  recompute();
+}
+
 function setBar(f) {
   $("bar-fill").style.width = Math.round(100 * f) + "%";
   $("loading-pct").textContent = Math.round(100 * f) + "%";
@@ -162,15 +213,71 @@ function syncSeats() {
   }
 }
 
+// ---- raw averages (no board) -------------------------------------
+function buildRawPicker() {
+  const root = $("raw-ups");
+  root.innerHTML = "";
+  for (let r = 0; r < 13; r++) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.textContent = rankChar(r);
+    b.addEventListener("click", () => {
+      state.rawUp = r;
+      recompute();
+    });
+    root.appendChild(b);
+  }
+}
+
+/** Show the controls for the current mode and hide the rest. */
+function syncMode() {
+  const raw = state.mode === "raw";
+  for (const b of document.querySelectorAll(".mode-btn"))
+    b.setAttribute("aria-pressed", String(b.dataset.mode === state.mode));
+  $("seats").hidden = raw;
+  $("raw-picker").hidden = !raw;
+  for (const el of document.querySelectorAll(".board-only")) el.hidden = raw;
+  for (const el of document.querySelectorAll(".raw-only")) el.hidden = !raw;
+  [...$("raw-ups").children].forEach((b, r) => b.setAttribute("aria-pressed", String(r === state.rawUp)));
+  for (const b of document.querySelectorAll(".size-btn"))
+    b.setAttribute("aria-pressed", String(Number(b.dataset.seats) === state.n));
+  for (const el of document.querySelectorAll(".n-seats")) el.textContent = SEAT_WORDS[state.n][0];
+  for (const el of document.querySelectorAll(".n-opp")) el.textContent = SEAT_WORDS[state.n][1];
+}
+
+/**
+ * Every hand's six-handed all-in average behind upcard `up`, with no board:
+ * only hero's own upcard is out of the deck. `opens` is false throughout —
+ * without a board there is no bar to clear.
+ */
+function rawEquities(up) {
+  const avail = new Array(13).fill(4);
+  avail[up]--;
+  const out = new Map();
+  for (let i = 0; i < DOWN.length; i++) {
+    const w = combos(DOWN[i], avail);
+    if (w <= 0) continue;
+    const e = state.avg[multisetRank([...DOWN[i], up].sort((x, y) => x - y))];
+    out.set(i, { e, eRaise: e, ev: 0, parts: [], opens: false, w, base: e });
+  }
+  return out;
+}
+
 // ---- derived state ----------------------------------------------
 const handEquities = (heroUp, req) => calcHandEquities(state, heroUp, req);
 
 function recompute() {
-  const req = requirement(state.ups, state.hero, state.biExtra);
-  state.req = req;
-  state.eq = new Map();
-  if (!req) return render();
-  state.eq = handEquities(state.ups[state.hero], req);
+  syncMode();
+  if (state.mode === "raw") {
+    state.req = null;
+    state.eq = rawEquities(state.rawUp);
+  } else {
+    const req = requirement(state.ups, state.hero, state.biExtra, state.rates);
+    state.req = req;
+    state.eq = new Map();
+    if (!req) return render();
+    state.eq = handEquities(state.ups[state.hero], req);
+  }
 
   // combo-weighted percentile and rank, both against *this* board
   const ids = [...state.eq.keys()].sort((a2, b2) => state.eq.get(a2).e - state.eq.get(b2).e);
@@ -228,7 +335,11 @@ function render() {
   syncSeats();
   const req = state.req;
   $("bi-label").textContent = `+${Math.round(100 * state.biExtra)} points`;
-  $("rates").textContent = state.ups.map((u) => `${rankChar(u)} ${Math.round(100 * CONTINUE[u])}%`).join("   ");
+  $("rates").textContent = state.ups.map((u) => `${rankChar(u)} ${Math.round(100 * state.rates.CONTINUE[u])}%`).join("   ");
+  $("rates-basis").textContent = state.n === 6
+    ? "Measured from a six-handed solve."
+    : `Derived, not solved: no solve exists ${state.n === 2 ? "heads-up" : "three-handed"}, so a seat ` +
+      "continues when calling a completion is worth more than folding with 4th–7th played out.";
   $("basis").innerHTML = state.reals.length
     ? "Decisions use <strong>realised</strong> values — 4th&ndash;7th are played out — under " +
       state.reals.length + " calling assumption" + (state.reals.length === 1 ? "" : "s") +
@@ -237,7 +348,8 @@ function render() {
       "EV is measured <strong>against folding</strong>: above 0 completes, 0 or below folds."
     : "<strong>All-in only</strong> — no realised table found. Run <code>make realtab-bracket</code>.";
 
-  if (!req) {
+  const raw = state.mode === "raw";
+  if (!req && !raw) {
     $("req").textContent = "—";
     $("reqsub").textContent = "That seat is the bring-in: posting is forced.";
     $("opens").textContent = "";
@@ -250,7 +362,7 @@ function render() {
   let best = 0;
   for (const v of state.eq.values()) best = Math.max(best, v.e);
   const anchor = state.fit ? Math.max(best, 1e-9) : 1;
-  const change = state.view === "change";
+  const change = state.view === "change" && !raw;
   let openW = 0, allW = 0, pIn = 0, eIn = 0;
 
   for (let i = 0; i < 13; i++)
@@ -262,37 +374,43 @@ function render() {
       if (!r) { blank(el, d); continue; }
       el.classList.remove("infeasible");
 
-      const rgb = change
-        ? changeColor(r.basePct - r.pct)
-        : heatColor(state.colorBy === "equity" ? 100 * (1 - r.e / anchor) : r.pct);
+      // a fold is filled blue rather than dimmed, so it still reads at a glance
+      const rgb = !raw && !r.opens
+        ? FOLD_RGB
+        : change
+          ? changeColor(r.basePct - r.pct)
+          : heatColor(state.colorBy === "equity" ? 100 * (1 - r.e / anchor) : r.pct);
       el.style.background = rgbCss(rgb);
       el.style.color = textOn(rgb);
       el.querySelector(".val").textContent = cellText(r, change);
 
-      el.classList.toggle("outside", !(r.opens && inBands(r)));
+      el.classList.toggle("outside", !inBands(r));
       allW += r.w;
       if (r.opens) openW += r.w;
       if (r.pct >= state.pmin && r.pct <= state.pmax) pIn += r.w;
       if (100 * r.e >= state.emin && 100 * r.e <= state.emax) eIn += r.w;
     }
 
-  // the weakest hand that completes, by all-in equity. Realised EV does not
-  // fall in perfect equity order, so a few hands above this can still fold.
-  let bar = 1;
-  for (const v of state.eq.values()) if (v.opens) bar = Math.min(bar, v.e);
-  $("req").textContent = bar > 0.999 ? "no opens" : `${(100 * bar).toFixed(1)}% equity`;
-  $("reqsub").textContent =
-    `BI+${req.pos}, ${req.behind.length} seat${req.behind.length === 1 ? "" : "s"} behind` +
-    ` · raised ${(100 * req.pRaised).toFixed(0)}% of the time`;
-  $("opens").innerHTML =
-    `opens <strong>${(100 * (allW ? openW / allW : 0)).toFixed(1)}%</strong>` +
-    ` of your range`;
-  $("why").innerHTML =
-    `All fold <strong>${(100 * req.pAllFold).toFixed(0)}%</strong> (win ${req.winFold}c) · ` +
-    `called <strong>${(100 * req.pCallOnly).toFixed(0)}%</strong> (pot ${req.potCall}c) · ` +
-    `<strong>raised ${(100 * req.pRaised).toFixed(0)}%</strong> (find 200c into ${req.potRaise}c, or fold). ` +
-    `Raisers: ` + req.raisers.filter((r) => r.p > 0.02).sort((a, b) => b.p - a.p)
-      .map((r) => `${rankChar(r.up)} ${(100 * r.p).toFixed(0)}%`).join(", ") + ".";
+  if (req) {
+    // the weakest hand that completes, by all-in equity. Realised EV does not
+    // fall in perfect equity order, so a few hands above this can still fold.
+    let bar = 1;
+    for (const v of state.eq.values()) if (v.opens) bar = Math.min(bar, v.e);
+    $("req").textContent = bar > 0.999 ? "no opens" : `${(100 * bar).toFixed(1)}% equity`;
+    $("reqsub").textContent =
+      `BI+${req.pos}, ${req.behind.length} seat${req.behind.length === 1 ? "" : "s"} behind` +
+      ` · raised ${(100 * req.pRaised).toFixed(0)}% of the time`;
+    $("opens").innerHTML =
+      `opens <strong>${(100 * (allW ? openW / allW : 0)).toFixed(1)}%</strong>` +
+      ` of your range`;
+    $("why").innerHTML =
+      `All fold <strong>${(100 * req.pAllFold).toFixed(0)}%</strong> (win ${req.winFold}c) · ` +
+      `called <strong>${(100 * req.pCallOnly).toFixed(0)}%</strong> (pot ${req.potCall}c) · ` +
+      `<strong>raised ${(100 * req.pRaised).toFixed(0)}%</strong> (find 200c into ${req.potRaise}c, or fold). ` +
+      `Raisers: ` + req.raisers.filter((r) => r.p > 0.02).sort((a, b) => b.p - a.p)
+        .map((r) => `${rankChar(r.up)} ${(100 * r.p).toFixed(0)}%`).join(", ") + ".";
+  }
+  $("legend-fold").hidden = raw;
   $("p-label").textContent = `top ${state.pmin}% – ${state.pmax}%`;
   $("e-label").textContent = `${state.emin}% – ${state.emax}% equity`;
   $("p-count").textContent = `${(100 * (allW ? pIn / allW : 0)).toFixed(0)}% of combos in band`;
@@ -336,7 +454,7 @@ function blank(el, d) {
 function buildTop() {
   const root = $("top-list");
   root.innerHTML = "";
-  const heroUp = state.ups[state.hero];
+  const heroUp = heroUpcard();
   const order = [...state.eq.keys()].sort((a, b) => state.eq.get(b).e - state.eq.get(a).e);
   for (const i of order.slice(0, 10)) {
     const r = state.eq.get(i);
@@ -345,7 +463,7 @@ function buildTop() {
       ["n", String(r.rank)],
       ["h", `${DOWN[i].map(rankChar).join("-")}/${rankChar(heroUp)}`],
       ["e", (100 * r.e).toFixed(1) + "%"],
-      ["v", signed(r.ev) + "c"],
+      ["v", state.mode === "raw" ? `top ${r.pct.toFixed(0)}%` : signed(r.ev) + "c"],
     ]) {
       const s = document.createElement("span");
       s.className = opens ? `${cls} row-hi` : cls;
@@ -587,6 +705,18 @@ function buildCmpPicker(heroUp, cmp) {
 
 // ---- controls ----------------------------------------------------
 function wire() {
+  for (const b of document.querySelectorAll(".size-btn"))
+    b.addEventListener("click", () => setSize(Number(b.dataset.seats)));
+  for (const b of document.querySelectorAll(".mode-btn"))
+    b.addEventListener("click", () => {
+      state.mode = b.dataset.mode;
+      // EV against folding needs a board; show equity without one
+      if (state.mode === "raw" && state.cellVal === "ev") {
+        state.cellVal = "equity";
+        document.querySelector('input[name="cellval"][value="equity"]').checked = true;
+      }
+      recompute();
+    });
   for (const [name, key] of [["view", "view"], ["colorby", "colorBy"], ["cellval", "cellVal"]])
     for (const r of document.querySelectorAll(`input[name="${name}"]`))
       r.addEventListener("change", () => {
@@ -619,23 +749,24 @@ function wire() {
 function showTip(el, i, c) {
   const d = downcardsFor(i, c);
   const r = state.eq.get(idxOf(d));
-  if (!r || !state.req) return hideTip();
+  if (!r || (!state.req && state.mode !== "raw")) return hideTip();
   const tip = $("tooltip");
   tip.innerHTML = "";
   const head = document.createElement("div");
   head.className = "t-hand";
-  head.textContent = `${d.map(rankChar).join("-")}/${rankChar(state.ups[state.hero])}`;
+  head.textContent = `${d.map(rankChar).join("-")}/${rankChar(heroUpcard())}`;
   tip.appendChild(head);
+  const raw = state.mode === "raw";
   for (const [k, v] of [
-    ["Equity", (100 * r.e).toFixed(1) + "%"],
-    ["vs raise", (100 * r.eRaise).toFixed(1) + "%"],
+    [raw ? "6-way avg" : "Equity", (100 * r.e).toFixed(1) + "%"],
+    ...(raw ? [] : [["vs raise", (100 * r.eRaise).toFixed(1) + "%"]]),
     ["Percentile", "top " + r.pct.toFixed(1) + "%"],
     ["Rank", `${r.rank} of ${state.eq.size}`],
-    ["EV vs fold", signed(r.ev, 1) + "c"],
-    ...(r.parts.length > 1
+    ...(raw ? [] : [["EV vs fold", signed(r.ev, 1) + "c"]]),
+    ...(!raw && r.parts.length > 1
       ? [["", r.parts.map((v, k) => `${state.reals[k].label} ${signed(v)}`).join(" · ")]]
       : []),
-    ["Verdict", r.opens ? "complete" : "fold"],
+    ...(raw ? [] : [["Verdict", r.opens ? "complete" : "fold"]]),
     ["Combos", String(r.w)],
   ]) {
     const line = document.createElement("div");

@@ -5,6 +5,7 @@
   --ink: #e8e6e0;
   --muted: #8c9490;
   --accent: #4a9db5;
+  --fold: #2e5e8c;   /* keep in step with FOLD_RGB in the page scripts */
 
   --cell: 52px;
   --fs-body: 13px;
@@ -73,6 +74,33 @@ body {
   line-height: 1.5;
 }
 
+/* ---- game switcher ------------------------------------------------ */
+/* sits above the loading screen, so you can switch games mid-download */
+.game-nav {
+  position: relative;
+  z-index: 11;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 14px 24px 0;
+}
+.game-nav a {
+  color: var(--muted);
+  text-decoration: none;
+  font-weight: 600;
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: var(--surface);
+}
+.game-nav a:hover {
+  color: var(--ink);
+}
+.game-nav a[aria-current="page"] {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
 /* ---- layout ------------------------------------------------------- */
 .app {
   display: grid;
@@ -90,6 +118,74 @@ body {
 }
 .left {
   min-width: 0;
+}
+
+/* ---- board / raw-averages toggle --------------------------------- */
+.mode-row {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+.mode-btn {
+  font: 600 var(--fs-body) / 1 "IBM Plex Sans", sans-serif;
+  padding: 6px 12px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: var(--surface);
+  color: var(--muted);
+  cursor: pointer;
+}
+.mode-btn:hover {
+  color: var(--ink);
+}
+.mode-btn[aria-pressed="true"] {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.mode-sep {
+  width: 1px;
+  align-self: stretch;
+  background: var(--line);
+  margin: 0 6px;
+}
+.mode-label {
+  align-self: center;
+  color: var(--muted);
+}
+.size-btn {
+  min-width: 34px;
+}
+/* stud pages: rank and suit side by side */
+.seat .pick {
+  display: flex;
+  gap: 3px;
+}
+.seat .pick select {
+  min-width: 0;
+}
+
+/* ---- hand-class highlights (stud8.html) ------------------------- */
+.class-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.class-row {
+  display: grid;
+  grid-template-columns: auto 14px 1fr auto;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+.class-swatch {
+  width: 14px;
+  height: 14px;
+  border: 3px solid;
+  border-radius: 2px;
+}
+.class-stat {
+  color: var(--muted);
+  white-space: nowrap;
 }
 
 /* ---- hero upcard selector -------------------------------------- */
@@ -164,11 +260,14 @@ body {
   font-size: var(--fs-cell-value);
   font-weight: 400;
 }
-/* opens under one calling assumption but not the other — undecided, and shown
-   as such rather than rounded to a clean yes or no */
-/* outside the selected percentile band — recede without vanishing */
+/* outside the selected percentile or equity band — recede without vanishing.
+   Folds are not dimmed; they are filled with --fold by the page script */
 .cell.outside {
   opacity: 0.16;
+}
+/* not in any ticked hand class (stud8.html) */
+.cell.unhighlit {
+  opacity: 0.22;
 }
 /* no combos left for this hand on the current board — outlined and marked n/a
    rather than blanked, so an impossible cell is distinguishable from an empty
@@ -211,6 +310,19 @@ body {
 .legend-bar {
   height: 10px;
   border: 1px solid var(--line);
+}
+.legend-fold {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  color: var(--muted);
+}
+.legend-fold .swatch {
+  width: 14px;
+  height: 14px;
+  border-radius: 2px;
+  background: var(--fold);
 }
 .legend-scale {
   display: flex;
